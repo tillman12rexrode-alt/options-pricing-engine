@@ -1,0 +1,5 @@
+method,theoretical_slope,fitted_slope,r_squared
+crr,-1.0,-0.9700,0.9972
+jr,-1.0,-1.0099,0.9986
+lr,-2.0,-1.9785,1.0000
+mc,-0.5,-0.5224,0.9980
