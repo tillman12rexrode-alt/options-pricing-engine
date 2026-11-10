@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import least_squares
 
 __all__ = ["ExpiryTerms", "clean", "implied_terms", "load_snapshot"]
 
@@ -97,8 +98,24 @@ def clean(
 
 
 def _fit_parity(strikes: np.ndarray, spread: np.ndarray) -> tuple[float, float, float]:
-    """Regress C - P on K. Returns (discount, forward, r_squared)."""
-    slope, intercept = np.polyfit(strikes, spread, 1)
+    """Regress C - P on K. Returns (discount, forward, r_squared).
+
+    The regression is robust rather than ordinary least squares. A single stale
+    or mismarked quote inside the fit window would otherwise drag the forward,
+    and because every implied volatility on the expiry is measured against that
+    forward, one bad quote would shift the entire slice - turning a local data
+    problem into a global one.
+    """
+    start = np.polyfit(strikes, spread, 1)
+    fit = least_squares(
+        lambda p: p[0] * strikes + p[1] - spread,
+        start,
+        loss="soft_l1",
+        f_scale=max(float(np.std(spread)) * 0.05, 1e-6),
+        max_nfev=2000,
+    )
+    slope, intercept = fit.x
+
     predicted = slope * strikes + intercept
     total = ((spread - spread.mean()) ** 2).sum()
     r_squared = 1.0 - ((spread - predicted) ** 2).sum() / total if total > 0 else float("nan")

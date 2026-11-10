@@ -29,6 +29,10 @@ notebooks = [
 data = [
     "requests>=2.31",
 ]
+app = [
+    "streamlit>=1.40",
+    "requests>=2.31",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
