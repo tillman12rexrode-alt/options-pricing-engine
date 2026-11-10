@@ -20,6 +20,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import plotstyle as ps
 
 from optpricing.contracts import Option
 from optpricing.models import binomial
@@ -30,43 +31,16 @@ ROOT = Path(__file__).resolve().parent.parent
 FIGURES = ROOT / "figures"
 RESULTS = ROOT / "analysis" / "results"
 
-# --- palette (categorical slots 1-4, light mode) -----------------------------
-SERIES = {"crr": "#2a78d6", "jr": "#eb6834", "lr": "#1baf7a", "mc": "#eda100"}
+SERIES = {"crr": ps.BLUE, "jr": ps.ORANGE, "lr": ps.AQUA, "mc": ps.YELLOW}
 LABELS = {
     "crr": "Cox-Ross-Rubinstein",
     "jr": "Jarrow-Rudd",
     "lr": "Leisen-Reimer",
     "mc": "Monte Carlo",
 }
-SURFACE = "#fcfcfb"
-INK = "#0b0b0b"
-MUTED = "#52514e"
-GRID = "#e3e2de"
+MUTED = ps.MUTED
 
 THEORY = {"crr": -1.0, "jr": -1.0, "lr": -2.0, "mc": -0.5}
-
-
-def _style() -> None:
-    plt.rcParams.update(
-        {
-            "figure.facecolor": SURFACE,
-            "axes.facecolor": SURFACE,
-            "savefig.facecolor": SURFACE,
-            "text.color": INK,
-            "axes.labelcolor": INK,
-            "axes.edgecolor": GRID,
-            "xtick.color": MUTED,
-            "ytick.color": MUTED,
-            "font.size": 11,
-            "axes.titlesize": 13,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "grid.color": GRID,
-            "grid.linewidth": 0.8,
-            "lines.linewidth": 2.0,
-            "figure.dpi": 140,
-        }
-    )
 
 
 @dataclass(frozen=True)
@@ -125,24 +99,6 @@ def fit_slope(work: np.ndarray, error: np.ndarray) -> tuple[float, float]:
     return float(slope), float(r2)
 
 
-# Aqua and yellow fall below 3:1 against the light surface, so they carry a
-# direct label as relief; blue and orange are identified by the legend alone.
-NEEDS_RELIEF = ("lr", "mc")
-
-
-def _label_end(ax, x, y, text, color) -> None:
-    """Direct label at the right end of a line - relief for low-contrast hues."""
-    ax.annotate(
-        text,
-        xy=(x[-1], y[-1]),
-        xytext=(6, 0),
-        textcoords="offset points",
-        color=color,
-        fontsize=9,
-        va="center",
-    )
-
-
 def figure_lattice(steps: list[int], errors: dict[str, np.ndarray], fits: dict) -> None:
     fig, ax = plt.subplots(figsize=(7.6, 4.8))
     for method in ("crr", "jr", "lr"):
@@ -155,8 +111,8 @@ def figure_lattice(steps: list[int], errors: dict[str, np.ndarray], fits: dict) 
             markersize=4,
             label=f"{LABELS[method]}  (slope {slope:+.2f})",
         )
-        if method in NEEDS_RELIEF:
-            _label_end(ax, steps, errors[method], method.upper(), SERIES[method])
+        if ps.needs_relief(SERIES[method]):
+            ps.label_end(ax, steps, errors[method], method.upper(), SERIES[method])
 
     ax.set_xlabel("Lattice steps (n)")
     ax.set_ylabel("RMS absolute pricing error (currency units)")
@@ -173,7 +129,7 @@ def figure_monte_carlo(paths: list[int], error: np.ndarray, fit: tuple) -> None:
     slope, _ = fit
     fig, ax = plt.subplots(figsize=(7.6, 4.8))
     ax.loglog(paths, error, color=SERIES["mc"], marker="o", markersize=4)
-    _label_end(ax, paths, error, f"slope {slope:+.2f}", SERIES["mc"])
+    ps.label_end(ax, paths, error, f"slope {slope:+.2f}", SERIES["mc"])
 
     reference = error[0] * (np.array(paths, float) / paths[0]) ** -0.5
     ax.loglog(paths, reference, color=MUTED, linestyle="--", linewidth=1.2, alpha=0.8)
@@ -208,7 +164,7 @@ def figure_oscillation(opt: Option) -> None:
     ax.axhline(0.0, color=MUTED, linewidth=1.0, alpha=0.7)
     ax.plot(crr_steps, crr, color=SERIES["crr"], linewidth=1.6, label="Cox-Ross-Rubinstein")
     ax.plot(lr_steps, lr, color=SERIES["lr"], linewidth=2.0, label="Leisen-Reimer")
-    _label_end(ax, lr_steps, lr, "LR", SERIES["lr"])
+    ps.label_end(ax, lr_steps, lr, "LR", SERIES["lr"])
 
     ax.set_xlabel("Lattice steps (n)")
     ax.set_ylabel("Signed pricing error (currency units)")
@@ -256,8 +212,8 @@ def figure_cost(opt: Option) -> None:
     for method in ("crr", "jr", "lr", "mc"):
         t, e = series[method]
         ax.loglog(t, e, color=SERIES[method], marker="o", markersize=4, label=LABELS[method])
-        if method in NEEDS_RELIEF:
-            _label_end(ax, t, e, method.upper(), SERIES[method])
+        if ps.needs_relief(SERIES[method]):
+            ps.label_end(ax, t, e, method.upper(), SERIES[method])
 
     ax.set_xlabel("Wall-clock seconds per price")
     ax.set_ylabel("Absolute pricing error (currency units)")
@@ -271,7 +227,7 @@ def figure_cost(opt: Option) -> None:
 
 
 def main() -> None:
-    _style()
+    ps.apply()
     FIGURES.mkdir(exist_ok=True)
     RESULTS.mkdir(parents=True, exist_ok=True)
 

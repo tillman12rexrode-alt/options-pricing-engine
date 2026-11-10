@@ -14,7 +14,7 @@ import numpy as np
 
 from optpricing.contracts import Option
 
-__all__ = ["MCResult", "price", "price_with_error"]
+__all__ = ["MCResult", "payoff", "price", "price_with_error", "terminal_spot"]
 
 _Z95 = 1.959963984540054  # two-sided 95% normal quantile
 
@@ -38,14 +38,15 @@ class MCResult:
         return f"{self.price:.4f} +/- {_Z95 * self.std_error:.4f} (95% CI [{low:.4f}, {high:.4f}])"
 
 
-def _terminal_spot(opt: Option, z: np.ndarray) -> np.ndarray:
+def terminal_spot(opt: Option, z: np.ndarray) -> np.ndarray:
     """Exact one-step sample of S_T under GBM for the standard normals in `z`."""
     drift = (opt.r - opt.q - 0.5 * opt.sigma**2) * opt.T
     diffusion = opt.sigma * math.sqrt(opt.T) * z
     return opt.S * np.exp(drift + diffusion)
 
 
-def _payoff(opt: Option, spot: np.ndarray) -> np.ndarray:
+def payoff(opt: Option, spot: np.ndarray) -> np.ndarray:
+    """Exercise value at each simulated terminal price."""
     if opt.is_call:
         return np.maximum(spot - opt.K, 0.0)
     return np.maximum(opt.K - spot, 0.0)
@@ -79,27 +80,26 @@ def price_with_error(
 
     if antithetic:
         z = rng.standard_normal(n_paths // 2)
-        spot = _terminal_spot(opt, np.concatenate([z, -z]))
+        spot = terminal_spot(opt, np.concatenate([z, -z]))
         # Average each (Z, -Z) pair into one sample, so the samples stay independent.
-        spot_samples = spot.reshape(2, -1)
-        payoff = discount * _payoff(opt, spot).reshape(2, -1).mean(axis=0)
-        control = spot_samples.mean(axis=0)
+        samples = discount * payoff(opt, spot).reshape(2, -1).mean(axis=0)
+        control = spot.reshape(2, -1).mean(axis=0)
     else:
-        spot = _terminal_spot(opt, rng.standard_normal(n_paths))
-        payoff = discount * _payoff(opt, spot)
+        spot = terminal_spot(opt, rng.standard_normal(n_paths))
+        samples = discount * payoff(opt, spot)
         control = spot
 
     if control_variate:
         expected_control = opt.S * math.exp((opt.r - opt.q) * opt.T)
         var_control = control.var(ddof=1)
         if var_control > 0:
-            beta = np.cov(payoff, control, ddof=1)[0, 1] / var_control
-            payoff = payoff - beta * (control - expected_control)
+            beta = np.cov(samples, control, ddof=1)[0, 1] / var_control
+            samples = samples - beta * (control - expected_control)
 
-    n = payoff.size
+    n = samples.size
     return MCResult(
-        price=float(payoff.mean()),
-        std_error=float(payoff.std(ddof=1) / math.sqrt(n)),
+        price=float(samples.mean()),
+        std_error=float(samples.std(ddof=1) / math.sqrt(n)),
         n_samples=n,
     )
 

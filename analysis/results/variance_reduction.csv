@@ -1,0 +1,5 @@
+variant,std_error,variance_reduction,seconds,efficiency_gain
+plain,0.02773170,1.000,0.004694,1.007
+antithetic,0.02146313,1.669,0.004507,1.751
+control,0.01123564,6.092,0.006781,4.247
+both,0.00561464,24.396,0.005394,21.379

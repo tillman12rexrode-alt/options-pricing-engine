@@ -14,7 +14,7 @@ from scipy.stats import norm
 
 from optpricing.contracts import Option
 
-__all__ = ["d1_d2", "price"]
+__all__ = ["d1_d2", "greeks", "price"]
 
 
 def d1_d2(opt: Option) -> tuple[float, float]:
@@ -54,3 +54,41 @@ def price(opt: Option) -> float:
     if opt.is_call:
         return discounted_spot * norm.cdf(d1) - discounted_strike * norm.cdf(d2)
     return discounted_strike * norm.cdf(-d2) - discounted_spot * norm.cdf(-d1)
+
+
+def greeks(opt: Option) -> dict[str, float]:
+    """Analytic Black-Scholes-Merton sensitivities.
+
+    Conventions: delta and gamma are per unit of spot, vega is per 1.00 of
+    volatility, theta is per year and signed as the value lost by the passage
+    of time, and rho is per 1.00 of the interest rate.
+    """
+    if opt.style != "european":
+        raise ValueError("Analytic Greeks are European only; use finite differences")
+    if opt.T == 0 or opt.sigma == 0:
+        raise ValueError("Greeks are undefined when sigma * sqrt(T) == 0")
+
+    d1, d2 = d1_d2(opt)
+    sqrt_t = math.sqrt(opt.T)
+    disc_q = math.exp(-opt.q * opt.T)
+    disc_r = math.exp(-opt.r * opt.T)
+    pdf_d1 = norm.pdf(d1)
+
+    gamma = disc_q * pdf_d1 / (opt.S * opt.sigma * sqrt_t)
+    vega = opt.S * disc_q * pdf_d1 * sqrt_t
+    decay = -opt.S * disc_q * pdf_d1 * opt.sigma / (2.0 * sqrt_t)
+
+    if opt.is_call:
+        delta = disc_q * norm.cdf(d1)
+        theta = decay - opt.r * opt.K * disc_r * norm.cdf(d2) + opt.q * opt.S * disc_q * norm.cdf(d1)
+        rho = opt.K * opt.T * disc_r * norm.cdf(d2)
+    else:
+        delta = -disc_q * norm.cdf(-d1)
+        theta = (
+            decay
+            + opt.r * opt.K * disc_r * norm.cdf(-d2)
+            - opt.q * opt.S * disc_q * norm.cdf(-d1)
+        )
+        rho = -opt.K * opt.T * disc_r * norm.cdf(-d2)
+
+    return {"delta": delta, "gamma": gamma, "vega": vega, "theta": theta, "rho": rho}
