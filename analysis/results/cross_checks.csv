@@ -1,0 +1,3 @@
+check,quotes,median_bp,mean_bp,p95_bp
+"call-implied vs put-implied vol, same strike",1122,2.3240119616808883,8.296919033907777,32.14741148634144
+our implied vol vs CBOE's published implied vol,2240,2.9342583348496154,22.614045470079475,100.23070195503581
