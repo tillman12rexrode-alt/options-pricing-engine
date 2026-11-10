@@ -26,6 +26,9 @@ dev = [
 notebooks = [
     "jupyter>=1.0",
 ]
+data = [
+    "requests>=2.31",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
