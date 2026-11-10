@@ -25,7 +25,13 @@ from optpricing.market import load_snapshot
 from optpricing.models import binomial
 from optpricing.models import black_scholes as bs
 from optpricing.models import monte_carlo as mc
-from optpricing.scanner import SurfaceAnalysis, analyze, find_outliers
+from optpricing.scanner import (
+    SurfaceAnalysis,
+    analyze,
+    find_outliers,
+    rank_candidates,
+    trade_mechanics,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -42,16 +48,21 @@ LABELS = {
     "volume": "Volume", "verdict": "Verdict", "rmse_vol_points": "RMSE (vol pts)",
     "worst_bias": "Worst bias", "scannable": "Scannable", "note": "Note",
     "check": "Check", "detail": "Contract", "trade": "Trade", "edge": "Edge ($)",
-    "stage": "Stage",
+    "stage": "Stage", "gap_points": "Gap (vol pts)", "gross": "Gross ($)",
+    "costs": "Frictions ($)", "net": "Net ($)", "breakeven_frac": "Gap needed",
+    "theta_per_day": "Theta ($/day)", "action": "Action", "quantity": "Contracts",
+    "vega_per_point": "Vega ($/pt)", "delta": "Delta",
 }
 
 
 def show(frame: pd.DataFrame, formats: dict | None = None) -> None:
     """Render a table with readable headers."""
     renamed = frame.rename(columns=LABELS)
-    styled = renamed.style
+    styled = renamed.style.format(na_rep="—")
     if formats:
-        styled = styled.format({LABELS.get(k, k): v for k, v in formats.items()})
+        styled = styled.format(
+            {LABELS.get(k, k): v for k, v in formats.items()}, na_rep="—"
+        )
     st.dataframe(styled, width="stretch", hide_index=True)
 
 
@@ -180,6 +191,85 @@ def tab_scan(analysis: SurfaceAnalysis, settings: dict) -> None:
         st.markdown(
             f"- **{row['expiry']} {row['strike']:g} {row['kind']}** — {row['reason']}"
         )
+
+    st.divider()
+    best_bet(analysis, hits, settings)
+
+
+def best_bet(analysis: SurfaceAnalysis, hits: pd.DataFrame, settings: dict) -> None:
+    """Rank the candidates by what the model says survives frictions."""
+    st.subheader("Best bet according to the model")
+    st.caption(
+        "Each candidate is traded as a package: sell what is rich, buy its neighbours "
+        "in whatever ratio makes the position neutral to volatility level and index "
+        "direction, so the only thing left is whether the gap closes. Ranked by what "
+        "remains after crossing every spread twice and paying commissions. This is "
+        "arithmetic on the model, not a recommendation — the model cannot tell you "
+        "whether the gap is real or whether the quote was simply stale."
+    )
+
+    ranked = rank_candidates(analysis, hits, fee_per_contract=settings["fee"])
+    if ranked.empty:
+        st.info("Nothing to rank.")
+        return
+
+    show(
+        ranked[[
+            "expiry", "kind", "strike", "verdict", "gap_points",
+            "gross", "costs", "net", "breakeven_frac", "theta_per_day",
+        ]],
+        {
+            "strike": "{:,.0f}", "gap_points": "{:.2f}", "gross": "${:,.2f}",
+            "costs": "${:,.2f}", "net": "${:,.2f}", "breakeven_frac": "{:.0%}",
+            "theta_per_day": "${:,.2f}",
+        },
+    )
+
+    tradeable = ranked[ranked["net"].notna()]
+    if tradeable.empty:
+        st.warning(
+            "None of the candidates can be hedged — each sits at the edge of its "
+            "strike range with no neighbour on one side."
+        )
+        return
+
+    top = tradeable.iloc[0]
+    flagged = hits[
+        (hits["expiry"] == top["expiry"])
+        & (hits["strike"] == top["strike"])
+        & (hits["kind"] == top["kind"])
+    ].iloc[0]
+    mechanics = trade_mechanics(analysis, flagged, fee_per_contract=settings["fee"])
+
+    st.markdown(
+        f"**Top of the list — {top['expiry']} {top['strike']:,.0f} {top['kind']}**"
+    )
+
+    a, b, c, d = st.columns(4)
+    a.metric("Gross if the gap closes", f"${mechanics.gross:,.2f}")
+    b.metric("Frictions", f"-${mechanics.entry_cost + mechanics.exit_cost + mechanics.commissions:,.2f}")
+    c.metric("Net", f"${mechanics.net:,.2f}")
+    d.metric("Theta", f"${mechanics.theta_per_day:,.2f}/day")
+
+    st.markdown("**The package**")
+    show(
+        mechanics.legs,
+        {
+            "strike": "{:,.0f}", "quantity": "{:.2f}", "bid": "{:.2f}",
+            "ask": "{:.2f}", "vega_per_point": "${:,.2f}", "delta": "{:+.4f}",
+        },
+    )
+
+    if mechanics.survives_costs:
+        st.info(mechanics.verdict())
+    else:
+        st.error(mechanics.verdict())
+
+    st.caption(
+        "Before acting on any of this: check whether the quote still looks the same "
+        "fifteen minutes from now. A gap that disappears on refresh was a stale quote, "
+        "and there was never anything to capture."
+    )
 
 
 def tab_inspect(analysis: SurfaceAnalysis, settings: dict) -> None:

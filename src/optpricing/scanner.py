@@ -27,7 +27,14 @@ from optpricing.market import ExpiryTerms, clean, implied_terms
 from optpricing.models import black_scholes as bs
 from optpricing.smile import SliceFit, fit_slice
 
-__all__ = ["SurfaceAnalysis", "analyze", "find_outliers"]
+__all__ = [
+    "SurfaceAnalysis",
+    "TradeMechanics",
+    "analyze",
+    "find_outliers",
+    "rank_candidates",
+    "trade_mechanics",
+]
 
 
 @dataclass(frozen=True)
@@ -186,3 +193,186 @@ def find_outliers(
         .sort_values("residual_points", key=np.abs, ascending=False)
         .reset_index(drop=True)
     )
+
+
+@dataclass(frozen=True)
+class TradeMechanics:
+    """What the trade on a flagged quote would be, and what it would cost.
+
+    This is arithmetic, not advice. It answers "if this gap is real and it
+    closes, does what is left after frictions exceed zero" - which on retail
+    fee structures is usually no, and that is the useful part.
+    """
+
+    legs: pd.DataFrame
+    edge_points: float
+    gross: float
+    entry_cost: float
+    exit_cost: float
+    commissions: float
+    net: float
+    breakeven_points: float
+    theta_per_day: float
+    multiplier: int
+
+    @property
+    def survives_costs(self) -> bool:
+        return self.net > 0.0
+
+    @property
+    def fraction_of_gap_needed(self) -> float:
+        """How much of the gap must close just to break even."""
+        if self.edge_points <= 0:
+            return float("inf")
+        return self.breakeven_points / self.edge_points
+
+    def verdict(self) -> str:
+        if not np.isfinite(self.fraction_of_gap_needed):
+            return "No measurable gap to trade."
+        if self.fraction_of_gap_needed >= 1.0:
+            return (
+                f"Frictions exceed the whole gap. The position would need "
+                f"{self.fraction_of_gap_needed:.1f}x more convergence than exists "
+                f"just to break even, so there is nothing here to capture."
+            )
+        return (
+            f"{self.fraction_of_gap_needed:.0%} of the gap must close just to cover "
+            f"frictions. Full convergence leaves ${self.net:,.2f} per package, before "
+            f"slippage and before the possibility that the quote was simply stale."
+        )
+
+
+def trade_mechanics(
+    analysis: SurfaceAnalysis,
+    flagged: pd.Series,
+    *,
+    fee_per_contract: float = 0.65,
+    multiplier: int = 100,
+) -> TradeMechanics | None:
+    """Build the vega- and delta-neutral package around a flagged contract.
+
+    The flagged leg is traded against its two nearest strikes in whatever ratio
+    makes the package neutral to both volatility level and index direction, so
+    the only thing left is whether the gap itself closes. Trading the flagged
+    contract outright instead would be a bet on the index, which is not what
+    the scanner found.
+    """
+    expiry = str(flagged["expiry"])
+    term = analysis.terms[expiry]
+    same = analysis.quotes[
+        (analysis.quotes["expiry"] == expiry) & (analysis.quotes["kind"] == flagged["kind"])
+    ].sort_values("strike").reset_index(drop=True)
+
+    position = same.index[same["strike"] == flagged["strike"]]
+    if len(position) != 1:
+        return None
+    centre = int(position[0])
+    if centre == 0 or centre == len(same) - 1:
+        return None  # no neighbours on one side
+
+    def describe(record: pd.Series) -> tuple[Option, float, float, float]:
+        opt = Option(
+            S=analysis.spot, K=float(record["strike"]), T=term.years, r=term.rate,
+            sigma=max(float(record["iv_brent"]), 1e-4), q=term.dividend_yield,
+            kind=str(record["kind"]),
+        )
+        greeks = bs.greeks(opt)
+        spread = (float(record["ask"]) - float(record["bid"])) * multiplier
+        return opt, greeks["vega"] / 100.0 * multiplier, greeks["delta"], spread
+
+    rich, vega0, delta0, spread0 = describe(same.loc[centre])
+    low, vega1, delta1, spread1 = describe(same.loc[centre - 1])
+    high, vega2, delta2, spread2 = describe(same.loc[centre + 1])
+
+    # Solve for the neighbour quantities that zero out both vega and delta.
+    matrix = np.array([[vega1, vega2], [delta1, delta2]])
+    if abs(np.linalg.det(matrix)) < 1e-12:
+        return None
+    quantity_low, quantity_high = np.linalg.solve(matrix, np.array([vega0, delta0]))
+
+    rich_is_rich = float(flagged["residual_points"]) > 0
+    sign = -1.0 if rich_is_rich else 1.0  # sell what is rich, buy what is cheap
+
+    legs = pd.DataFrame([
+        {"strike": rich.K, "action": "sell" if rich_is_rich else "buy",
+         "quantity": abs(sign) * 1.0, "bid": float(same.loc[centre, "bid"]),
+         "ask": float(same.loc[centre, "ask"]), "vega_per_point": vega0, "delta": delta0},
+        {"strike": low.K, "action": "buy" if rich_is_rich else "sell",
+         "quantity": abs(quantity_low), "bid": float(same.loc[centre - 1, "bid"]),
+         "ask": float(same.loc[centre - 1, "ask"]), "vega_per_point": vega1, "delta": delta1},
+        {"strike": high.K, "action": "buy" if rich_is_rich else "sell",
+         "quantity": abs(quantity_high), "bid": float(same.loc[centre + 1, "bid"]),
+         "ask": float(same.loc[centre + 1, "ask"]), "vega_per_point": vega2, "delta": delta2},
+    ])
+
+    contracts = 1.0 + abs(quantity_low) + abs(quantity_high)
+    entry = 0.5 * (spread0 + abs(quantity_low) * spread1 + abs(quantity_high) * spread2)
+    commissions = 2.0 * contracts * fee_per_contract
+
+    edge_points = abs(float(flagged["residual_points"]))
+    gross = edge_points * vega0
+    net = gross - 2.0 * entry - commissions
+    breakeven = (2.0 * entry + commissions) / vega0 if vega0 > 0 else float("inf")
+
+    theta = (
+        sign * bs.greeks(rich)["theta"]
+        - sign * quantity_low * bs.greeks(low)["theta"]
+        - sign * quantity_high * bs.greeks(high)["theta"]
+    ) / 365.0 * multiplier
+
+    return TradeMechanics(
+        legs=legs, edge_points=edge_points, gross=gross, entry_cost=entry,
+        exit_cost=entry, commissions=commissions, net=net,
+        breakeven_points=breakeven, theta_per_day=float(theta), multiplier=multiplier,
+    )
+
+
+def rank_candidates(
+    analysis: SurfaceAnalysis,
+    hits: pd.DataFrame,
+    *,
+    fee_per_contract: float = 0.65,
+    multiplier: int = 100,
+) -> pd.DataFrame:
+    """Order flagged quotes by what the model says is left after frictions.
+
+    This is the closest thing to a "best bet" the model can honestly produce.
+    It ranks by net profit assuming the gap closes completely, which is the
+    optimistic end of the range, and reports how much of the gap must close
+    merely to break even. A candidate can be top of this list and still be a
+    bad trade - most often because the quote was stale and there was never a
+    gap to close - so the columns that matter are `net` and `breakeven_frac`,
+    not the ordering.
+    """
+    rows = []
+    for _, flagged in hits.iterrows():
+        mechanics = trade_mechanics(
+            analysis, flagged, fee_per_contract=fee_per_contract, multiplier=multiplier
+        )
+        if mechanics is None:
+            rows.append({
+                "expiry": flagged["expiry"], "strike": flagged["strike"],
+                "kind": flagged["kind"], "verdict": flagged["verdict"],
+                "gap_points": abs(float(flagged["residual_points"])),
+                "gross": np.nan, "costs": np.nan, "net": np.nan,
+                "breakeven_frac": np.nan, "theta_per_day": np.nan,
+                "note": "No neighbouring strike on one side, so the position cannot be hedged.",
+            })
+            continue
+
+        rows.append({
+            "expiry": flagged["expiry"], "strike": flagged["strike"],
+            "kind": flagged["kind"], "verdict": flagged["verdict"],
+            "gap_points": mechanics.edge_points,
+            "gross": mechanics.gross,
+            "costs": mechanics.entry_cost + mechanics.exit_cost + mechanics.commissions,
+            "net": mechanics.net,
+            "breakeven_frac": mechanics.fraction_of_gap_needed,
+            "theta_per_day": mechanics.theta_per_day,
+            "note": mechanics.verdict(),
+        })
+
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return table
+    return table.sort_values("net", ascending=False, na_position="last").reset_index(drop=True)

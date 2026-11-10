@@ -257,6 +257,44 @@ def figure_mispricing(table: pd.DataFrame) -> None:
     plt.close(fig)
 
 
+def cross_checks(solved: pd.DataFrame, terms: dict) -> pd.DataFrame:
+    """Two checks on the implied volatilities that use nothing from this project.
+
+    Call- and put-implied volatility at the same strike must agree, because
+    parity is model-free - they only do if the forward backed out of the parity
+    regression is right. And CBOE publishes its own implied volatilities in the
+    same feed, computed independently, so the difference is a check against an
+    outside party rather than against ourselves.
+    """
+    rows = []
+
+    paired = solved.pivot_table(
+        index=["expiry", "strike"], columns="kind", values="iv_brent"
+    ).dropna()
+    if not paired.empty:
+        gap = (paired["call"] - paired["put"]).abs() * 10_000  # basis points
+        rows.append({
+            "check": "call-implied vs put-implied vol, same strike",
+            "quotes": len(paired),
+            "median_bp": float(gap.median()),
+            "mean_bp": float(gap.mean()),
+            "p95_bp": float(gap.quantile(0.95)),
+        })
+
+    published = solved[solved["cboe_iv"].fillna(0) > 0]
+    if not published.empty:
+        gap = (published["iv_brent"] - published["cboe_iv"]).abs() * 10_000
+        rows.append({
+            "check": "our implied vol vs CBOE's published implied vol",
+            "quotes": len(published),
+            "median_bp": float(gap.median()),
+            "mean_bp": float(gap.mean()),
+            "p95_bp": float(gap.quantile(0.95)),
+        })
+
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     ps.apply()
     FIGURES.mkdir(exist_ok=True)
@@ -286,6 +324,17 @@ def main() -> None:
         )
         term_rows.append(term.as_row())
     pd.DataFrame(term_rows).to_csv(RESULTS / "implied_terms.csv", index=False)
+
+    checks = cross_checks(solved, terms)
+    if not checks.empty:
+        print("\ncross-checks against things this project did not produce:")
+        print(f"  {'check':<48}{'quotes':>8}{'median':>10}{'mean':>9}{'p95':>8}")
+        for row in checks.itertuples(index=False):
+            print(
+                f"  {row.check:<48}{row.quotes:>8,}{row.median_bp:>9.1f}bp"
+                f"{row.mean_bp:>8.1f}bp{row.p95_bp:>7.0f}bp"
+            )
+        checks.to_csv(RESULTS / "cross_checks.csv", index=False)
 
     errors = repricing_errors(solved, terms, spot)
     errors.to_csv(RESULTS / "flat_vol_errors.csv", index=False)

@@ -8,6 +8,7 @@ Three independent European option pricers, validated against each other and agai
 
 ## 1. The engines agree, at the rate theory says they should
 
+
 Black-Scholes is exact for European options, so it is the reference. For each approximate engine, the error against it is measured across a sweep of work — lattice steps, or simulated paths — on a grid of six contracts spanning in, at and out of the money at one month and one year. The empirical convergence rate is the OLS slope of log(error) on log(work).
 
 | Method | Theoretical | Measured slope | R² |
@@ -33,6 +34,7 @@ Leisen-Reimer is the flat line through the middle. The oscillation is not noise;
 
 ## 2. Variance reduction, measured per second rather than per path
 
+
 Antithetic and control variates both lower Monte Carlo variance. The honest question is whether they lower it faster than they cost, so the metric here is efficiency — inversely proportional to variance times run time — not variance alone.
 
 | Technique | Variance reduction | Efficiency gain |
@@ -46,6 +48,7 @@ The control variate row is the point of the section. It cuts variance 6.1× and 
 ---
 
 ## 3. Greeks, three ways
+
 
 All five Greeks are computed analytically, by central finite difference, and — for delta — by Monte Carlo pathwise differentiation. Analytic and finite-difference agree to between 1.3e-11 and 1.7e-08.
 
@@ -64,6 +67,7 @@ At a bump of 0.01 the shared-draw estimate gives 0.6501 against an analytic 0.65
 ---
 
 ## 4. Where the model breaks
+
 
 ### Data
 
@@ -129,15 +133,23 @@ Pricing each expiry with its own at-the-money volatility — the single number B
 
 The asymmetry is the equity index skew: the market charges substantially more for downside protection than a lognormal model says it should, and somewhat less for upside.
 
-### Three independent checks on the numbers
+### Three checks against things this project did not produce
 
-- Call-implied and put-implied volatility at the same strike agree to about 4 basis points — which only happens if the forward from the parity regression is right.
-- Against CBOE's own published implied volatilities, median absolute difference is **3 basis points**.
-- The 31-day at-the-money volatility computed here is **15.6%**; CBOE publishes 15.441 for its 30-day index volatility in the same feed.
+| Check | Quotes | Median | Mean | 95th pct |
+| --- | --- | --- | --- | --- |
+| Call-implied vs put-implied vol, same strike | 1,122 | **2.3 bp** | 8.3 bp | 32 bp |
+| Our implied vol vs CBOE's published vol | 2,240 | **2.9 bp** | 22.6 bp | 100 bp |
+
+The first is model-free: put-call parity says those two volatilities must agree, and they only do if the forward backed out of the parity regression is right. The second compares against an outside party computing the same quantity independently.
+
+Third, the 31-day at-the-money volatility computed here is **15.6%**; CBOE publishes 15.441 for its 30-day index volatility in the same feed — a 16 basis point difference, arrived at from raw bid-ask quotes through this project's own parity regression and Brent solver.
+
+Both tables are written to `analysis/results/cross_checks.csv` by `analysis/volatility_smile.py`.
 
 ---
 
 ## 5. Scope: what this does not do, and why
+
 
 - **No stochastic volatility or jump-diffusion.** Heston and Merton exist precisely because of the pattern measured in section 4, and they are the honest next step. Naming them is more useful than half-building one.
 - **No exotic payoffs**, with one exception: the geometric Asian, needed as a Monte Carlo control variate.
@@ -145,7 +157,46 @@ The asymmetry is the equity index skew: the market charges substantially more fo
 - **No performance work beyond vectorized NumPy.** No Cython, no Rust.
 - **Nothing that places a trade.**
 
-## 6. Limitations
+## 6. The app
+
+
+![Surface Scanner](figures/app_best_bet.png)
+
+A browser app over the library, in three tabs.
+
+**Scan** fits a curve through each expiry's implied volatilities and lists quotes sitting far off it, with a written reason for each. Two guards keep it honest: an expiry whose smile did not fit is skipped rather than scanned, and a quote is only flagged when the gap exceeds its own bid-ask spread converted into volatility points. It then ranks the candidates by what survives frictions — the package is sell-the-rich, buy-the-neighbours in whatever ratio zeroes out vega and delta, costed with every spread crossed twice. On the committed snapshot the best candidate nets $86 against a $144 gross, so 40% of the gap must close merely to break even.
+
+**Inspect** prices any contract three ways with full Greeks, and shows the rate, dividend yield and forward implied by that expiry's own quotes.
+
+**Arbitrage** runs put-call parity, vertical, butterfly and calendar checks on executable prices. It finds nothing on SPX, which is the expected result and is reported as such.
+
+```bash
+pip install -e ".[app]"
+streamlit run app/streamlit_app.py
+```
+
+Only European, cash-settled index options are supported — SPX, XSP, NDX, RUT, DJX. Equity options are American, which turns put-call parity from an equality into a pair of inequalities and breaks the forward extraction everything else depends on.
+
+## 7. Running it
+
+
+```bash
+pip install -e ".[dev]"
+pytest                                   # 159 tests
+
+python analysis/convergence.py           # section 1
+python analysis/variance_reduction.py    # section 2
+python analysis/greeks_study.py          # section 3
+python analysis/volatility_smile.py      # section 4
+streamlit run app/streamlit_app.py       # section 6
+```
+
+Every figure in this README regenerates from the committed snapshot. Taking a fresh chain needs `pip install -e ".[data]"` and `python analysis/fetch_chain.py`, which must run on a machine with direct internet access.
+
+Results tables are written to `analysis/results/`.
+
+## 8. Limitations
+
 
 - One snapshot of one underlying on one date. Nothing here speaks to how the surface moves.
 - Mid prices are not executable prices. Real transaction costs are at least half the spread.
@@ -153,28 +204,14 @@ The asymmetry is the equity index skew: the market charges substantially more fo
 - Time to expiry is measured in calendar days. A trading-day convention would shift short-dated implied vols measurably.
 - The 8-day expiry's implied rate of 6.05% is noisy: at T = 0.022 years, small pricing errors annualize into large rate errors.
 
-## 7. Running it
+## 9. References
 
-```bash
-pip install -e ".[dev]"
-pytest                                   # 131 tests
-
-python analysis/convergence.py           # section 1
-python analysis/variance_reduction.py    # section 2
-python analysis/greeks_study.py          # section 3
-python analysis/volatility_smile.py      # section 4
-```
-
-Every figure in this README regenerates from the committed snapshot. Taking a fresh chain needs `pip install -e ".[data]"` and `python analysis/fetch_chain.py`, which must run on a machine with direct internet access.
-
-Results tables are written to `analysis/results/`.
-
-## 8. References
 
 - Hull, *Options, Futures, and Other Derivatives* — benchmark values and the Black-Scholes-Merton chapter.
 - Leisen, D. and Reimer, M. (1996), "Binomial models for option valuation — examining and improving convergence."
 - Glasserman, P., *Monte Carlo Methods in Financial Engineering* — variance reduction and pathwise derivatives.
 
 ## License
+
 
 MIT
