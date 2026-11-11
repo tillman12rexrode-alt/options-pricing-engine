@@ -57,13 +57,24 @@ def _peizer_pratt(z: float, n: int) -> float:
     return 0.5 + math.copysign(0.5 * math.sqrt(inner), z)
 
 
-def _leisen_reimer(opt: Option, dt: float, n_steps: int) -> tuple[float, float, float]:
+def _leisen_reimer(opt: Option, dt: float, n_steps: int, spot: float) -> tuple[float, float, float]:
     vol_sqrt_t = opt.sigma * math.sqrt(opt.T)
-    d1 = (math.log(opt.S / opt.K) + (opt.r - opt.q + 0.5 * opt.sigma**2) * opt.T) / vol_sqrt_t
+    d1 = (math.log(spot / opt.K) + (opt.r - opt.q + 0.5 * opt.sigma**2) * opt.T) / vol_sqrt_t
     d2 = d1 - vol_sqrt_t
 
     p = _peizer_pratt(d2, n_steps)
     p_star = _peizer_pratt(d1, n_steps)
+
+    # Peizer-Pratt saturates at exactly 0 or 1 once |d2| is large, which happens
+    # when sigma * sqrt(T) is tiny - the deterministic limit, where there is no
+    # tree left to build. Caught here so the caller gets the library's own error
+    # rather than a ZeroDivisionError from the line below.
+    if not 0.0 < p < 1.0:
+        raise ValueError(
+            f"Leisen-Reimer degenerates at sigma={opt.sigma:g}, T={opt.T:g}: "
+            f"the inversion gives p={p:.4f}, outside (0, 1). "
+            "Use a larger volatility, or the crr or jr parameterization."
+        )
 
     growth = math.exp((opt.r - opt.q) * dt)
     u = growth * p_star / p
@@ -71,10 +82,37 @@ def _leisen_reimer(opt: Option, dt: float, n_steps: int) -> tuple[float, float, 
     return u, d, p
 
 
+def _escrow(opt: Option, t: float) -> float:
+    """Value at time `t` of the dividends still to be paid before expiry.
+
+    The escrowed-dividend method prices on a tree whose nodes are the stock
+    price *less* the present value of the dividends it has yet to pay. That
+    quantity is what diffuses lognormally; the dividend stream does not. So the
+    actual stock price at any node is the node's own value plus this escrow,
+    and that sum - not the node value - is what an early exercise is worth.
+
+    A dividend falling exactly at `t` has just been paid and is excluded.
+    """
+    if not opt.dividends:
+        return 0.0
+    return sum(
+        amount * math.exp(-opt.r * (when - t))
+        for when, amount in opt.dividends
+        if t < when <= opt.T
+    )
+
+
 def price(opt: Option, n_steps: int = 500, method: str = "crr") -> float:
     """Price a European or American option on a binomial lattice.
 
     `method` selects the tree parameterization: "crr", "jr" or "lr".
+
+    A discrete dividend schedule on the contract is handled by the escrowed
+    method: the tree is built on the spot net of the present value of the
+    dividends, and early exercise is tested against the escrow-restored price.
+    This is an approximation - it holds the escrowed process lognormal rather
+    than the stock itself - but it keeps the tree recombining, which the exact
+    treatment does not.
     """
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}, got {method!r}")
@@ -86,12 +124,20 @@ def price(opt: Option, n_steps: int = 500, method: str = "crr") -> float:
     dt = opt.T / n_steps
     discount = math.exp(-opt.r * dt)
 
+    # With no schedule this is opt.S exactly, so every existing result is unchanged.
+    spot_base = opt.S - _escrow(opt, 0.0)
+    if spot_base <= 0:
+        raise ValueError(
+            f"dividends worth {opt.S - spot_base:.4f} exceed the spot of {opt.S}; "
+            "the escrowed spot would be non-positive"
+        )
+
     if method == "crr":
         u, d, p = _crr(opt, dt)
     elif method == "jr":
         u, d, p = _jarrow_rudd(opt, dt)
     else:
-        u, d, p = _leisen_reimer(opt, dt, n_steps)
+        u, d, p = _leisen_reimer(opt, dt, n_steps, spot_base)
 
     if not 0.0 < p < 1.0:
         raise ValueError(
@@ -100,8 +146,9 @@ def price(opt: Option, n_steps: int = 500, method: str = "crr") -> float:
         )
 
     # Terminal layer: j counts up-moves, so node j has j ups and (n_steps - j) downs.
+    # At expiry nothing remains in escrow, so the node value is the stock price.
     j = np.arange(n_steps + 1)
-    values = _payoff(opt, opt.S * u**j * d ** (n_steps - j))
+    values = _payoff(opt, spot_base * u**j * d ** (n_steps - j))
 
     american = opt.style == "american"
 
@@ -112,6 +159,7 @@ def price(opt: Option, n_steps: int = 500, method: str = "crr") -> float:
         if american:
             # Spot prices at level i - note the exponents use i, not n_steps.
             j = np.arange(i + 1)
-            values = np.maximum(values, _payoff(opt, opt.S * u**j * d ** (i - j)))
+            exercise_spot = spot_base * u**j * d ** (i - j) + _escrow(opt, i * dt)
+            values = np.maximum(values, _payoff(opt, exercise_spot))
 
     return float(values[0])
