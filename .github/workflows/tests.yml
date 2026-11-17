@@ -13,7 +13,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[dev]"
+        # The app extra too, so tests/test_app.py drives the real pages in CI
+        # instead of skipping for want of Streamlit.
+        run: pip install -e ".[dev,app]"
       - name: Lint
         run: ruff check .
       - name: Test

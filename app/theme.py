@@ -107,6 +107,15 @@ _CSS = f"""
 .st-key-headline [data-testid="stColumn"]:first-child [data-testid="stMetricLabel"] p {{
   opacity: 0.92;
 }}
+/* A delta badge (a day's price change) on that tile. Its usual red or green
+   tint would vanish into the green, so it becomes a translucent white pill;
+   the arrow and the sign still say which way the price moved. */
+.st-key-headline [data-testid="stColumn"]:first-child [data-testid="stMetricDelta"] {{
+  background: rgba(255, 255, 255, 0.18);
+}}
+.st-key-headline [data-testid="stColumn"]:first-child [data-testid="stMetricDelta"] svg {{
+  fill: #ffffff;
+}}
 
 @media (prefers-reduced-motion: reduce) {{
   *, *::before, *::after {{

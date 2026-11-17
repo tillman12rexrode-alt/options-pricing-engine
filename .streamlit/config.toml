@@ -28,7 +28,6 @@ showSidebarBorder = true
 paddingTop = "1.5rem"
 
 [theme.light]
-base = "light"
 primaryColor = "#157a46"
 backgroundColor = "#fbfcfa"
 secondaryBackgroundColor = "#eff5f1"
@@ -47,7 +46,6 @@ secondaryBackgroundColor = "#e6f0e9"
 borderColor = "#d9e5dc"
 
 [theme.dark]
-base = "dark"
 primaryColor = "#34b36d"
 backgroundColor = "#0e1813"
 secondaryBackgroundColor = "#16251d"
