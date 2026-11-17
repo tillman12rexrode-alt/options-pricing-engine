@@ -17,6 +17,12 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 APP = str(Path(__file__).resolve().parent.parent / "app" / "streamlit_app.py")
 
 
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """No test reaches FRED, even on a machine that has a key configured."""
+    monkeypatch.setenv("OPTPRICING_OFFLINE", "1")
+
+
 @pytest.fixture
 def app(monkeypatch) -> AppTest:
     monkeypatch.delenv("OPTPRICING_LIVE_DATA", raising=False)
@@ -75,3 +81,30 @@ def test_a_cheap_stock_still_shows_a_useful_number_of_strikes(app):
     _ticker(app).set_value("RCAT").run()
     chain = next(frame for frame in app.dataframe if "Strike" in frame.value.columns)
     assert len(chain.value) >= 8
+
+
+def test_the_model_tabs_are_there(app):
+    assert [tab.label for tab in app.tabs] == ["Chain", "Model vs market", "Greeks", "Smile"]
+
+
+def test_model_vs_market_reports_its_checks(app):
+    labels = {metric.label: metric.value for metric in app.metric}
+    assert labels["Our IV vs Cboe's"].endswith("vol pts")
+    assert float(labels["Our IV vs Cboe's"].split()[0]) < 0.3
+    assert "of" in labels["Contracts with an implied vol"]
+    assert "Quotes off the smile by more than their spread" in labels
+
+
+def test_without_fred_the_fallback_is_said_out_loud(app):
+    assert any("no FRED key" in warning.value for warning in app.warning)
+    rate = next(c.value for c in app.caption if c.value.startswith("Rate:"))
+    assert "carry this expiry's own options imply" in rate
+    assert "4.50% assumption" in rate
+
+
+def test_a_thin_chain_says_it_is_not_priced(app):
+    _ticker(app).set_value("RCAT").run()
+    assert not app.exception
+    labels = {metric.label: metric.value for metric in app.metric}
+    assert labels["Priced off the smile"] == "No"
+    assert any("expensive to borrow" in c.value for c in app.caption)

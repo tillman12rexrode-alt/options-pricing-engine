@@ -12,10 +12,12 @@ import math
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import model_views
 import pandas as pd
 import requests
 import state
 import streamlit as st
+from components import text
 
 from optpricing.providers import cboe
 
@@ -204,17 +206,25 @@ def pick_expiry(snap: cboe.ChainSnapshot) -> str:
 _SIDE = {"bid": "bid", "ask": "ask", "volume": "vol.", "open_interest": "OI", "cboe_iv": "IV"}
 
 
+def strikes_in_view(snap: cboe.ChainSnapshot, expiry: str, window: float | None) -> list[float]:
+    """The strikes on screen. The chain and the model views use the same set.
+
+    A percentage window alone fails on a cheap stock: at $3.53 with $1 strikes,
+    25% either side catches two. So never show fewer than the strikes nearest
+    the share price.
+    """
+    strikes = pd.Series(sorted(snap.quotes.loc[snap.quotes["expiry"] == expiry, "strike"].unique()))
+    if window is None:
+        return strikes.tolist()
+    nearest = set(strikes.iloc[(strikes - snap.spot).abs().argsort()[:MIN_STRIKES]])
+    low, high = snap.spot * (1 - window), snap.spot * (1 + window)
+    return [k for k in strikes if low <= k <= high or k in nearest]
+
+
 def chain_frame(snap: cboe.ChainSnapshot, expiry: str, window: float | None) -> pd.DataFrame:
     """Calls on the left, puts on the right, one row per strike. Numeric."""
     quotes = snap.quotes[snap.quotes["expiry"] == expiry]
-    if window is not None:
-        # A percentage window alone fails on a cheap stock: at $3.53 with $1
-        # strikes, 25% either side catches two. So never show fewer than the
-        # strikes nearest the share price.
-        strikes = pd.Series(sorted(quotes["strike"].unique()))
-        nearest = set(strikes.iloc[(strikes - snap.spot).abs().argsort()[:MIN_STRIKES]])
-        low, high = snap.spot * (1 - window), snap.spot * (1 + window)
-        quotes = quotes[quotes["strike"].between(low, high) | quotes["strike"].isin(nearest)]
+    quotes = quotes[quotes["strike"].isin(strikes_in_view(snap, expiry, window))]
 
     sides = []
     for kind, label in (("call", "Call"), ("put", "Put")):
@@ -227,13 +237,6 @@ def chain_frame(snap: cboe.ChainSnapshot, expiry: str, window: float | None) -> 
     calls = [c for c in table.columns if c.startswith("Call")]
     puts = [c for c in table.columns if c.startswith("Put")]
     return table[[*calls, "Strike", *puts]]
-
-
-def _text(value: float, pattern: str) -> str:
-    """Format a number, or say plainly that there isn't one."""
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return "n/a"
-    return pattern.format(value)
 
 
 def show_chain(table: pd.DataFrame, spot: float) -> None:
@@ -250,7 +253,7 @@ def show_chain(table: pd.DataFrame, spot: float) -> None:
     patterns = {"bid": "{:,.2f}", "ask": "{:,.2f}", "vol.": "{:,.0f}", "OI": "{:,.0f}", "IV": "{:.1%}"}
     shown = pd.DataFrame({
         col: [
-            _text(v, "{:,.2f}" if col == "Strike" else patterns[col.split(" ", 1)[1]])
+            text(v, "{:,.2f}" if col == "Strike" else patterns[col.split(" ", 1)[1]])
             for v in table[col]
         ]
         for col in table.columns
@@ -346,19 +349,48 @@ def render() -> None:
     with right:
         every = st.toggle("Show every strike", value=False)
 
-    table = chain_frame(snap, expiry, None if every else DEFAULT_WINDOW)
-    if table.empty:
-        st.info(
-            f"No strikes within {DEFAULT_WINDOW:.0%} of the share price for this expiry. "
-            "Turn on Show every strike to see the rest."
+    window = None if every else DEFAULT_WINDOW
+    chain_tab, model_tab, greeks_tab, smile_tab = st.tabs(
+        ["Chain", "Model vs market", "Greeks", "Smile"]
+    )
+
+    with chain_tab:
+        table = chain_frame(snap, expiry, window)
+        if table.empty:
+            st.info(
+                f"No strikes within {DEFAULT_WINDOW:.0%} of the share price for this expiry. "
+                "Turn on Show every strike to see the rest."
+            )
+        else:
+            show_chain(table, snap.spot)
+            st.caption(
+                "Shaded cells are in the money. OI is open interest; IV is Cboe's implied "
+                "volatility. Every figure here is Cboe's, unmodified. Each contract is for "
+                f"{int(snap.quotes['multiplier'].iloc[0])} shares."
+            )
+
+    strikes = strikes_in_view(snap, expiry, window)
+    with st.spinner(
+        f"Solving American implied vols and Greeks for {len(strikes)} strikes on the lattice..."
+    ):
+        analysis, curve_problem = model_views.analyze(
+            snap, f"{mode}:{target}", expiry, strikes, historical=(mode == BUNDLED)
         )
-    else:
-        show_chain(table, snap.spot)
-        st.caption(
-            "Shaded cells are in the money. OI is open interest; IV is Cboe's implied "
-            "volatility. Every figure here is Cboe's, unmodified. Each contract is for "
-            f"{int(snap.quotes['multiplier'].iloc[0])} shares."
-        )
+
+    with model_tab:
+        model_views.assumptions(analysis, curve_problem)
+        model_views.model_vs_market(analysis)
+    with greeks_tab:
+        model_views.assumptions(analysis, curve_problem)
+        model_views.greeks_view(analysis)
+    with smile_tab:
+        model_views.smile_chart(analysis)
 
     with st.expander("What was left out, and why"):
         coverage(snap, expiry)
+        st.markdown("**For the model**")
+        st.dataframe(
+            pd.DataFrame(analysis.funnel, columns=["", "Contracts"]),
+            hide_index=True,
+            width="content",
+        )
