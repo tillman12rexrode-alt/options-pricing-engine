@@ -57,10 +57,10 @@ class SVIParams:
     @property
     def min_total_variance(self) -> float:
         """w at its minimum; negative here would mean an impossible smile."""
-        return self.a + self.b * self.s * math_sqrt(1.0 - self.rho**2)
+        return self.a + self.b * self.s * _math_sqrt(1.0 - self.rho**2)
 
 
-def math_sqrt(x: float) -> float:
+def _math_sqrt(x: float) -> float:
     return float(np.sqrt(max(x, 0.0)))
 
 
