@@ -1,0 +1,65 @@
+# Green and white, in both light and dark mode.
+#
+# Colour and type live here rather than in CSS because Streamlit applies these
+# natively: they reach the data grid, the charts, the widgets and the focus
+# rings, and they keep working across Streamlit upgrades. The CSS in
+# app/theme.py adds only what config cannot express, which is motion.
+#
+# Every accent was checked for WCAG AA contrast:
+#   light #157a46  5.2:1 on the page, 4.9:1 on the sidebar, 5.4:1 under white text
+#   dark  #34b36d  6.7:1 on the page, 5.9:1 on the sidebar
+# No single green can carry white button text on a dark page and still read
+# as text on that page, so a primary button added later needs a dark label in
+# dark mode. The app has no buttons today.
+
+[theme]
+font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap, sans-serif"
+codeFont = "Geist Mono:https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&display=swap, monospace"
+headingFontSizes = ["2.25rem", "1.5rem", "1.2rem", "1rem", "0.9rem", "0.8rem"]
+headingFontWeights = [650, 600, 600, 600, 600, 600]
+metricValueFontSize = "1.9rem"
+metricValueFontWeight = 600
+baseRadius = "0.75rem"
+buttonRadius = "0.75rem"
+showWidgetBorder = true
+showSidebarBorder = true
+# Measured from below the header bar, which Streamlit adds on top. 1.5rem
+# lands a little under the 6rem default and lifts the headline numbers.
+paddingTop = "1.5rem"
+
+[theme.light]
+base = "light"
+primaryColor = "#157a46"
+backgroundColor = "#fbfcfa"
+secondaryBackgroundColor = "#eff5f1"
+textColor = "#13211a"
+borderColor = "#d9e5dc"
+linkColor = "#157a46"
+greenColor = "#157a46"
+dataframeHeaderBackgroundColor = "#eff5f1"
+dataframeBorderColor = "#d9e5dc"
+# Accent first, then the CVD-checked hues analysis/plotstyle.py already uses.
+chartCategoricalColors = ["#157a46", "#2a78d6", "#eb6834", "#eda100", "#7a8a81"]
+
+[theme.light.sidebar]
+backgroundColor = "#f3f8f4"
+secondaryBackgroundColor = "#e6f0e9"
+borderColor = "#d9e5dc"
+
+[theme.dark]
+base = "dark"
+primaryColor = "#34b36d"
+backgroundColor = "#0e1813"
+secondaryBackgroundColor = "#16251d"
+textColor = "#e4eee8"
+borderColor = "#24382c"
+linkColor = "#34b36d"
+greenColor = "#34b36d"
+dataframeHeaderBackgroundColor = "#16251d"
+dataframeBorderColor = "#24382c"
+chartCategoricalColors = ["#34b36d", "#4a95ec", "#f07d4d", "#f2b630", "#9aaba2"]
+
+[theme.dark.sidebar]
+backgroundColor = "#0b140f"
+secondaryBackgroundColor = "#13211a"
+borderColor = "#24382c"

@@ -21,10 +21,10 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from optpricing import greeks as greek_tools
 from optpricing.contracts import Option
 from optpricing.implied_vol import solve_chain
 from optpricing.market import ExpiryTerms, clean, implied_terms
-from optpricing.models import black_scholes as bs
 from optpricing.smile import SliceFit, fit_slice
 
 __all__ = [
@@ -85,7 +85,7 @@ def _spread_in_vol_points(row: pd.Series, term: ExpiryTerms, spot: float) -> flo
         q=term.dividend_yield,
         kind=str(row["kind"]),
     )
-    vega = bs.greeks(opt)["vega"]
+    vega = greek_tools.estimate(opt, "vega")
     if vega <= 1e-8:
         return float("inf")
     return float(row["ask"] - row["bid"]) / vega * 100.0
@@ -276,7 +276,7 @@ def trade_mechanics(
             sigma=max(float(record["iv_brent"]), 1e-4), q=term.dividend_yield,
             kind=str(record["kind"]),
         )
-        greeks = bs.greeks(opt)
+        greeks = greek_tools.estimate_all(opt)
         spread = (float(record["ask"]) - float(record["bid"])) * multiplier
         return opt, greeks["vega"] / 100.0 * multiplier, greeks["delta"], spread
 
@@ -315,9 +315,9 @@ def trade_mechanics(
     breakeven = (2.0 * entry + commissions) / vega0 if vega0 > 0 else float("inf")
 
     theta = (
-        sign * bs.greeks(rich)["theta"]
-        - sign * quantity_low * bs.greeks(low)["theta"]
-        - sign * quantity_high * bs.greeks(high)["theta"]
+        sign * greek_tools.estimate(rich, "theta")
+        - sign * quantity_low * greek_tools.estimate(low, "theta")
+        - sign * quantity_high * greek_tools.estimate(high, "theta")
     ) / 365.0 * multiplier
 
     return TradeMechanics(

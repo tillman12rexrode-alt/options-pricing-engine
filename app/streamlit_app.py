@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import theme
 
 from optpricing import arbitrage as arb
 from optpricing.contracts import Option
@@ -37,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 
 st.set_page_config(page_title="Surface Scanner", page_icon="📈", layout="wide")
+theme.apply()
 
 #: Column names people read, rather than the ones the library uses internally.
 LABELS = {
@@ -58,10 +60,10 @@ LABELS = {
 def show(frame: pd.DataFrame, formats: dict | None = None) -> None:
     """Render a table with readable headers."""
     renamed = frame.rename(columns=LABELS)
-    styled = renamed.style.format(na_rep="—")
+    styled = renamed.style.format(na_rep="n/a")
     if formats:
         styled = styled.format(
-            {LABELS.get(k, k): v for k, v in formats.items()}, na_rep="—"
+            {LABELS.get(k, k): v for k, v in formats.items()}, na_rep="n/a"
         )
     st.dataframe(styled, width="stretch", hide_index=True)
 
@@ -111,7 +113,7 @@ def sidebar() -> dict:
         symbol = st.sidebar.selectbox(
             "Index",
             sorted(INDEX_SYMBOLS),
-            format_func=lambda s: f"{s} — {INDEX_SYMBOLS[s]}",
+            format_func=lambda s: f"{s} ({INDEX_SYMBOLS[s]})",
         )
     else:
         snapshot = st.sidebar.selectbox("Snapshot", snapshots, format_func=lambda p: p.name)
@@ -155,7 +157,7 @@ def tab_scan(analysis: SurfaceAnalysis, settings: dict) -> None:
 
     report = analysis.fit_report()
     scannable = int(report["scannable"].sum())
-    st.markdown(f"**Smile fits** — {scannable} of {len(report)} expiries usable")
+    st.markdown(f"**Smile fits:** {scannable} of {len(report)} expiries usable")
     show(report, {"rmse_vol_points": "{:.3f}", "worst_bias": "{:.3f}"})
 
     hits = find_outliers(
@@ -169,7 +171,7 @@ def tab_scan(analysis: SurfaceAnalysis, settings: dict) -> None:
     if hits.empty:
         st.success(
             "Nothing clears the thresholds. On a liquid chain that is the usual and "
-            "correct result — loosen the sliders to see what sits just below the bar."
+            "correct result. Loosen the sliders to see what sits just below the bar."
         )
         return
 
@@ -189,7 +191,7 @@ def tab_scan(analysis: SurfaceAnalysis, settings: dict) -> None:
     st.markdown("**Why each one is flagged**")
     for _, row in hits.head(15).iterrows():
         st.markdown(
-            f"- **{row['expiry']} {row['strike']:g} {row['kind']}** — {row['reason']}"
+            f"- **{row['expiry']} {row['strike']:g} {row['kind']}:** {row['reason']}"
         )
 
     st.divider()
@@ -204,7 +206,7 @@ def best_bet(analysis: SurfaceAnalysis, hits: pd.DataFrame, settings: dict) -> N
         "in whatever ratio makes the position neutral to volatility level and index "
         "direction, so the only thing left is whether the gap closes. Ranked by what "
         "remains after crossing every spread twice and paying commissions. This is "
-        "arithmetic on the model, not a recommendation — the model cannot tell you "
+        "arithmetic on the model, not a recommendation. The model cannot tell you "
         "whether the gap is real or whether the quote was simply stale."
     )
 
@@ -228,7 +230,7 @@ def best_bet(analysis: SurfaceAnalysis, hits: pd.DataFrame, settings: dict) -> N
     tradeable = ranked[ranked["net"].notna()]
     if tradeable.empty:
         st.warning(
-            "None of the candidates can be hedged — each sits at the edge of its "
+            "None of the candidates can be hedged. Each sits at the edge of its "
             "strike range with no neighbour on one side."
         )
         return
@@ -242,7 +244,7 @@ def best_bet(analysis: SurfaceAnalysis, hits: pd.DataFrame, settings: dict) -> N
     mechanics = trade_mechanics(analysis, flagged, fee_per_contract=settings["fee"])
 
     st.markdown(
-        f"**Top of the list — {top['expiry']} {top['strike']:,.0f} {top['kind']}**"
+        f"**Top of the list: {top['expiry']} {top['strike']:,.0f} {top['kind']}**"
     )
 
     a, b, c, d = st.columns(4)
@@ -370,7 +372,7 @@ def tab_inspect(analysis: SurfaceAnalysis, settings: dict) -> None:
 def tab_arbitrage(analysis: SurfaceAnalysis, settings: dict) -> None:
     st.subheader("Relations that hold regardless of any model")
     st.caption(
-        "Every test runs on executable prices — buy at the ask, sell at the bid. "
+        "Every test runs on executable prices: buy at the ask, sell at the bid. "
         "A violation measured on mid prices is usually just the spread."
     )
 
@@ -399,12 +401,12 @@ def tab_arbitrage(analysis: SurfaceAnalysis, settings: dict) -> None:
 
     with st.expander("What is being checked"):
         st.markdown(
-            "- **Put-call parity** — C − P must equal D(F − K). European only.\n"
-            "- **Vertical spreads** — a lower-strike call cannot cost less than a "
+            "- **Put-call parity:** C − P must equal D(F − K). European only.\n"
+            "- **Vertical spreads:** a lower-strike call cannot cost less than a "
             "higher-strike one.\n"
-            "- **Butterflies** — option prices must be convex in strike, so a "
+            "- **Butterflies:** option prices must be convex in strike, so a "
             "butterfly cannot be worth less than nothing.\n"
-            "- **Calendars** — total implied variance cannot fall as maturity rises, "
+            "- **Calendars:** total implied variance cannot fall as maturity rises, "
             "compared at equal moneyness on the fitted smiles."
         )
 
@@ -418,10 +420,10 @@ def main() -> None:
     try:
         if settings["source"].startswith("Live"):
             frame, spot, asof = load_live(settings["symbol"])
-            label = f"{settings['symbol']} — live, 15-minute delayed"
+            label = f"{settings['symbol']} live quotes. Source: Cboe, data delayed 15 minutes."
         else:
             frame, spot, asof = load_bundled(str(settings["snapshot"]))
-            label = f"{settings['snapshot'].name} — bundled snapshot"
+            label = f"Bundled snapshot {settings['snapshot'].name}. Source: Cboe delayed quotes."
     except Exception as error:  # noqa: BLE001 - surfaced to the user, not swallowed
         st.error(f"Could not load a chain: {error}")
         st.stop()
@@ -430,10 +432,13 @@ def main() -> None:
         analysis = run_analysis(frame, spot, asof, settings["max_rel_spread"])
 
     st.title("Surface Scanner")
-    a, b, c = st.columns(3)
-    a.metric("Underlying", f"{spot:,.2f}")
-    b.metric("Session", asof.isoformat())
-    c.metric("Quotes solved", f"{len(analysis.quotes):,}")
+    # Keyed so app/theme.py can style this row by name rather than by its
+    # position on the page, which will change as sections are added.
+    with st.container(key="headline"):
+        a, b, c = st.columns(3)
+        a.metric("Underlying", f"{spot:,.2f}")
+        b.metric("Session", asof.isoformat())
+        c.metric("Quotes solved", f"{len(analysis.quotes):,}")
     st.caption(label)
 
     with st.expander("How many quotes survived cleaning"):
