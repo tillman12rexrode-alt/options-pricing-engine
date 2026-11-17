@@ -155,3 +155,16 @@ def test_malformed_curves_are_rejected(tenors: tuple, rates: tuple):
 def test_negative_maturity_is_rejected():
     with pytest.raises(ValueError, match="negative"):
         fred.flat_curve(0.04, date(2026, 11, 16)).rate(-0.1)
+
+
+def test_a_past_date_asks_fred_for_that_day_not_today():
+    """A saved snapshot is priced with the rates of the day it was quoted."""
+    requested: list[str] = []
+    fred.fetch_curve(SECRET, asof=date(2026, 11, 16), get_json=_fake_fred(requested))
+    assert all("observation_end=2026-11-16" in url for url in requested)
+
+
+def test_without_a_date_fred_returns_the_latest():
+    requested: list[str] = []
+    fred.fetch_curve(SECRET, get_json=_fake_fred(requested))
+    assert not any("observation_end" in url for url in requested)

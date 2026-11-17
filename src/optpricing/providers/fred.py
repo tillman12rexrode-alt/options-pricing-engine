@@ -150,11 +150,15 @@ def _urllib_get_json(url: str, timeout: float) -> dict:
 def fetch_curve(
     api_key: str | None = None,
     *,
+    asof: date | None = None,
     series: dict[str, float] | None = None,
     get_json: Callable[[str, float], dict] | None = None,
     timeout: float = 10.0,
 ) -> YieldCurve:
-    """Download the latest Treasury curve from FRED.
+    """Download the Treasury curve from FRED: the latest, or as of a past day.
+
+    Pass `asof` when pricing a saved snapshot, so its options are discounted
+    at the rates of the day they were quoted rather than today's.
 
     `get_json` exists so tests can supply recorded responses instead of touching
     the network. Errors are re-raised without the request URL, because the URL
@@ -167,13 +171,16 @@ def fetch_curve(
     points: list[tuple[float, float]] = []
     observed: dict[str, date] = {}
     for series_id, maturity in sorted(wanted.items(), key=lambda kv: kv[1]):
-        query = urllib.parse.urlencode({
+        params = {
             "series_id": series_id,
             "api_key": key,
             "file_type": "json",
             "sort_order": "desc",
             "limit": _LOOKBACK,
-        })
+        }
+        if asof is not None:
+            params["observation_end"] = asof.isoformat()
+        query = urllib.parse.urlencode(params)
         try:
             payload = fetch(f"{URL}?{query}", timeout)
         except urllib.error.HTTPError as error:

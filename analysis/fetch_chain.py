@@ -52,7 +52,7 @@ def report(snapshot: ChainSnapshot, selected: list[str]) -> None:
     zero_bid = int((quotes["bid"].fillna(0) <= 0).sum())
     print(f"zero or missing bid: {zero_bid:,} of {len(quotes):,}\n")
 
-    print("selected expiries:")
+    print("selected expiries:" if snapshot.kind == "index" else "expiries (all kept):")
     for expiry in selected:
         rows = quotes[quotes["expiry"] == expiry]
         days = (type(snapshot.trading_date).fromisoformat(expiry) - snapshot.trading_date).days

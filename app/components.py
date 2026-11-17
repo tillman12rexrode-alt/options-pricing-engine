@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
-__all__ = ["LABELS", "show"]
+__all__ = ["LABELS", "show", "text"]
 
 #: Column names people read, rather than the ones the library uses internally.
 LABELS = {
@@ -33,3 +35,14 @@ def show(frame: pd.DataFrame, formats: dict | None = None) -> None:
             {LABELS.get(k, k): v for k, v in formats.items()}, na_rep="n/a"
         )
     st.dataframe(styled, width="stretch", hide_index=True)
+
+
+def text(value, pattern: str) -> str:
+    """Format a number, or say plainly that there isn't one.
+
+    Streamlit draws a missing number as "None" whatever formatting it is
+    given, so tables that can have gaps are formatted to text first.
+    """
+    if value is None or (isinstance(value, float) and math.isnan(value)) or value is pd.NA:
+        return "n/a"
+    return pattern.format(value)

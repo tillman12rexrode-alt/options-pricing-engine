@@ -296,6 +296,8 @@ def tab_inspect(analysis: SurfaceAnalysis, settings: dict) -> None:
         "Fitted vol",
         "not fitted" if pd.isna(fitted) else f"{fitted:.2%}",
         None if pd.isna(fitted) else f"{row['residual_points']:+.2f} vol pts",
+        delta_color="off",  # a gap to the curve, not a gain or a loss
+        delta_arrow="off",
     )
     if pd.isna(fitted):
         st.caption(
@@ -309,7 +311,13 @@ def tab_inspect(analysis: SurfaceAnalysis, settings: dict) -> None:
     a, b, c = st.columns(3)
     a.metric("Black-Scholes", f"{bs.price(opt):.3f}")
     b.metric(f"Lattice (LR, {lattice_steps})", f"{binomial.price(opt, lattice_steps, 'lr'):.3f}")
-    c.metric("Monte Carlo", f"{simulated.price:.3f}", f"± {1.96 * simulated.std_error:.3f} (95%)")
+    c.metric(
+        "Monte Carlo",
+        f"{simulated.price:.3f}",
+        f"± {1.96 * simulated.std_error:.3f} (95%)",
+        delta_color="off",  # a confidence interval, not a change
+        delta_arrow="off",
+    )
 
     st.markdown("**Greeks**")
     greeks = bs.greeks(opt)
@@ -342,7 +350,8 @@ def tab_inspect(analysis: SurfaceAnalysis, settings: dict) -> None:
             sigma=guess, q=term.dividend_yield, kind=kind,
         )
         st.metric("Black-Scholes price", f"{bs.price(trial):.3f}",
-                  f"{bs.price(trial) - float(row['mid']):+.3f} vs market mid")
+                  f"{bs.price(trial) - float(row['mid']):+.3f} vs market mid",
+                  delta_color="off", delta_arrow="off")
         back = implied_vol(float(row["mid"]), opt, "brent")
         st.caption(
             f"Solved back from the market mid: {back.sigma:.4%} in {back.iterations} "

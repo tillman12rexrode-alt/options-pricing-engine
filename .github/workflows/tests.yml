@@ -1,7 +1,10 @@
 name: tests
 
+# Pushes to main, plus every pull request. Testing a branch's push as well
+# as its pull request ran the same commit twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
