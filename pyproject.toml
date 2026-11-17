@@ -30,7 +30,9 @@ data = [
     "requests>=2.31",
 ]
 app = [
-    "streamlit>=1.40",
+    # 1.67 is the version the theme in .streamlit/config.toml was verified on.
+    # Older releases ignore [theme.light] and [theme.dark] and fall back to red.
+    "streamlit>=1.67",
     "requests>=2.31",
 ]
 
