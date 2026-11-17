@@ -93,10 +93,12 @@ class Option:
         across contracts with different maturities.
         """
         horizon = self.T if before is None else before
+        # Strictly after now, matching the lattice's escrow: a dividend going ex
+        # today is already out of the spot price.
         return sum(
             amount * math.exp(-self.r * when)
             for when, amount in self.dividends
-            if 0.0 <= when <= horizon
+            if 0.0 < when <= horizon
         )
 
     def intrinsic(self, spot: float | None = None) -> float:

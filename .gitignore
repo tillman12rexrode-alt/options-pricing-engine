@@ -185,3 +185,7 @@ cython_debug/
 
 # Streamlit API keys. The theme in .streamlit/config.toml is committed; secrets never are.
 .streamlit/secrets.toml
+
+# Analysis runs on any snapshot other than the reference one.
+figures/scratch/
+analysis/results/scratch/
