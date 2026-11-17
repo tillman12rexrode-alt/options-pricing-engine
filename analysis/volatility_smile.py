@@ -16,6 +16,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -53,11 +54,35 @@ def trading_date(stamp: str):
     return utc.astimezone(EXCHANGE).date()
 
 
+#: The snapshot every figure and number in the README was computed from. Daily
+#: snapshots accumulate in data/; this one stays fixed so the results reproduce.
+REFERENCE = DATA / "reference" / "spx_chain_2026-11-10.csv"
+
+
 def latest_snapshot() -> Path:
     files = sorted(DATA.glob("*_chain_*.csv"))
     if not files:
         raise SystemExit("No snapshot in data/. Run: python analysis/fetch_chain.py")
     return files[-1]
+
+
+def choose_snapshot(argv: list[str] | None = None) -> Path:
+    """The reference snapshot by default, so published numbers reproduce exactly."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--snapshot",
+        default="reference",
+        help='"reference" (the README\'s figures), "latest" (newest in data/), or a path',
+    )
+    choice = parser.parse_args(argv).snapshot
+    if choice == "reference":
+        return REFERENCE
+    if choice == "latest":
+        return latest_snapshot()
+    path = Path(choice)
+    if not path.exists():
+        raise SystemExit(f"No snapshot at {path}")
+    return path
 
 
 def atm_vol(group: pd.DataFrame) -> float:
@@ -297,10 +322,17 @@ def cross_checks(solved: pd.DataFrame, terms: dict) -> pd.DataFrame:
 
 def main() -> None:
     ps.apply()
-    FIGURES.mkdir(exist_ok=True)
-    RESULTS.mkdir(parents=True, exist_ok=True)
+    path = choose_snapshot()
 
-    path = latest_snapshot()
+    # Only the reference snapshot may write the committed results and figures.
+    # Any other run goes to an ignored scratch folder, so exploring today's
+    # chain can never silently replace the numbers the README cites.
+    global FIGURES, RESULTS
+    if path.resolve() != REFERENCE.resolve():
+        FIGURES = ROOT / "figures" / "scratch"
+        RESULTS = ROOT / "analysis" / "results" / "scratch"
+    FIGURES.mkdir(parents=True, exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     frame, spot, _ = load_snapshot(path)
     asof = trading_date(frame["asof"].iloc[0])
     print(f"snapshot      {path.name}")
