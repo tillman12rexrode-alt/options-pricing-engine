@@ -117,6 +117,21 @@ _CSS = f"""
   fill: #ffffff;
 }}
 
+/* Tile rows wrap instead of truncating. Streamlit only stacks columns below
+   a 640px viewport; between that and a wide window, four tiles squeezed into
+   a narrow pane cut "$352.78" down to "$35...". A tile never gets narrower
+   than its content needs, so a row wraps to 2 + 2 before anything is cut. */
+.st-key-headline [data-testid="stHorizontalBlock"],
+[class*="st-key-tiles"] [data-testid="stHorizontalBlock"] {{
+  flex-wrap: wrap;
+  row-gap: 1rem;
+}}
+.st-key-headline [data-testid="stColumn"],
+[class*="st-key-tiles"] [data-testid="stColumn"] {{
+  flex: 1 1 12rem !important;
+  min-width: 12rem !important;
+}}
+
 @media (prefers-reduced-motion: reduce) {{
   *, *::before, *::after {{
     animation: none !important;

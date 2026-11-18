@@ -11,6 +11,7 @@ import os
 
 import streamlit as st
 
+from optpricing.providers import cboe
 from optpricing.providers.cboe import INDEX_SYMBOLS
 
 DEFAULT_TICKER = "AAPL"
@@ -57,3 +58,59 @@ def live_data_enabled() -> bool:
         return bool(st.secrets.get("LIVE_DATA", False))
     except Exception:  # no secrets file exists at all, which is the public default
         return False
+
+
+def secret(name: str) -> str | None:
+    """A setting from the environment or .streamlit/secrets.toml, never from code."""
+    value = os.environ.get(name)
+    if value:
+        return value.strip()
+    try:
+        value = st.secrets.get(name)
+    except Exception:  # no secrets file exists at all, which is the public default
+        return None
+    return str(value).strip() if value else None
+
+
+# ------------------------------------------------------------------ the pickers
+#
+# Each page draws its own Ticker widget, and Streamlit treats widgets on
+# different pages as different widgets even under the same key: a page you
+# switch to starts from its default. So every page keys its picker by page,
+# writes the shared ticker into it before drawing it, and records a pick in a
+# change callback. Callbacks run before the page does, so by the time the
+# widget is seeded the shared ticker already holds the visitor's new pick.
+
+
+def ticker_select(symbols: list[str], page: str) -> str:
+    """A ticker dropdown in the sidebar that every page shares."""
+    key = f"ticker_select_{page}"
+    if current_ticker() not in symbols:
+        set_ticker(symbols[0])
+    st.session_state[key] = current_ticker()
+    st.sidebar.selectbox(
+        "Ticker", symbols, key=key,
+        format_func=lambda s: f"{s}  ({display_name(s)})",
+        on_change=lambda: set_ticker(st.session_state[key]),
+    )
+    return current_ticker()
+
+
+def ticker_input(page: str) -> str | None:
+    """A free-text ticker box in the sidebar, for live data. None while the entry is invalid."""
+    key, error_key = f"ticker_input_{page}", "ticker_error"
+
+    def changed() -> None:
+        st.session_state[error_key] = None
+        try:
+            set_ticker(cboe.normalize(st.session_state[key]))
+        except cboe.InvalidTickerError as error:
+            st.session_state[error_key] = str(error)
+
+    if not st.session_state.get(error_key):
+        st.session_state[key] = current_ticker()
+    st.sidebar.text_input("Ticker", key=key, max_chars=5, placeholder="AAPL", on_change=changed)
+    if st.session_state.get(error_key):
+        st.sidebar.error(st.session_state[error_key])
+        return None
+    return current_ticker()
