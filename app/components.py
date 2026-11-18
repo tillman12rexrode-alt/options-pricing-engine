@@ -7,7 +7,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-__all__ = ["LABELS", "show", "text"]
+__all__ = ["LABELS", "money", "show", "text"]
 
 #: Column names people read, rather than the ones the library uses internally.
 LABELS = {
@@ -46,3 +46,15 @@ def text(value, pattern: str) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)) or value is pd.NA:
         return "n/a"
     return pattern.format(value)
+
+
+def money(value, digits: int = 1) -> str:
+    """$478.8B, $73.7M, -$121.9M, $0.91. Big numbers people can read at a glance."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return "n/a"
+    sign = "-" if value < 0 else ""
+    size = abs(value)
+    for scale, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if size >= scale:
+            return f"{sign}${size / scale:,.{digits}f}{suffix}"
+    return f"{sign}${size:,.2f}"

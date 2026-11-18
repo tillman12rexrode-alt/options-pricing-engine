@@ -108,3 +108,43 @@ def test_a_thin_chain_says_it_is_not_priced(app):
     labels = {metric.label: metric.value for metric in app.metric}
     assert labels["Priced off the smile"] == "No"
     assert any("expensive to borrow" in c.value for c in app.caption)
+
+
+def _research(app: AppTest) -> AppTest:
+    app.switch_page("views/research.py").run()
+    assert not app.exception
+    return app
+
+
+def test_the_research_page_opens_on_the_same_ticker(app):
+    _ticker(app).set_value("TSLA").run()
+    research = _research(app)
+    assert research.title[0].value == "TSLA"
+    assert "Tesla" in research.caption[0].value
+
+
+def test_research_shows_filings_and_options(app):
+    research = _research(app)
+    labels = {metric.label: metric.value for metric in research.metric}
+    assert labels["Market cap"].endswith("T")
+    assert labels["P/E, last 12 months"].endswith("x")
+    assert labels["Revenue"].startswith("$")
+    headings = [s.value for s in research.subheader]
+    assert headings == ["Last twelve months", "Annual results", "Valuation",
+                        "What the options price in", "Filings"]
+    assert any("sec.gov/Archives" in m.value for m in research.markdown)
+
+
+def test_research_says_loss_instead_of_a_negative_pe(app):
+    research = _research(app)
+    _ticker(research).set_value("RCAT").run()
+    assert not research.exception
+    labels = {metric.label: metric.value for metric in research.metric}
+    assert labels["P/E, last 12 months"] == "Loss"
+
+
+def test_switching_ticker_on_research_carries_back_to_options(app):
+    research = _research(app)
+    _ticker(research).set_value("NVDA").run()
+    research.switch_page("views/stocks.py").run()
+    assert research.title[0].value == "NVDA"

@@ -162,27 +162,31 @@ Both tables are written to `analysis/results/cross_checks.csv` by `analysis/vola
 
 ![Surface Scanner](figures/app_best_bet.png)
 
-A browser app over the library, in three tabs.
+A browser app over the library, in three pages. The public deployment shows saved snapshots; live data is switched on only when running it yourself.
 
-**Scan** fits a curve through each expiry's implied volatilities and lists quotes sitting far off it, with a written reason for each. Two guards keep it honest: an expiry whose smile did not fit is skipped rather than scanned, and a quote is only flagged when the gap exceeds its own bid-ask spread converted into volatility points. It then ranks the candidates by what survives frictions — the package is sell-the-rich, buy-the-neighbours in whatever ratio zeroes out vega and delta, costed with every spread crossed twice. On the committed snapshot the best candidate nets $86 against a $144 gross, so 40% of the gap must close merely to break even.
+**Stock options** shows one stock's Cboe chain (AAPL, NVDA, TSLA, KTOS and RCAT are saved), then prices it with American-exercise lattices. *Model vs market* solves each quote's American implied vol and checks it against Cboe's own (they agree to about 0.1 vol points out of the money on the liquid names). Where the chain supports one, it fits a smile and reports each quote's gap to it in dollars and in half-spreads, as a measurement, never a verdict. The rate is the carry each expiry's options imply: at the Treasury rate, calls and puts disagree on volatility, by over six points on RCAT, a stock that is expensive to borrow. *Greeks* and *Smile* follow.
 
-**Inspect** prices any contract three ways with full Greeks, and shows the rate, dividend yield and forward implied by that expiry's own quotes.
+**Stock research** puts the company's own reported numbers, from its 10-K and 10-Q filings via SEC EDGAR, next to what its options price in: twelve-month figures built from year-to-date filings, four years of history, valuation multiples at the snapshot's price, and the at-the-money term structure with the expected move to each expiry.
 
-**Arbitrage** runs put-call parity, vertical, butterfly and calendar checks on executable prices. It finds nothing on SPX, which is the expected result and is reported as such.
+**Index options** is the original surface scanner for SPX, XSP, NDX, RUT and DJX:
+
+- *Scan* fits a curve through each expiry's implied volatilities and lists quotes sitting far off it, with a written reason for each. Two guards keep it honest: an expiry whose smile did not fit is skipped rather than scanned, and a quote is only flagged when the gap exceeds its own bid-ask spread converted into volatility points. It then ranks the candidates by what survives frictions — the package is sell-the-rich, buy-the-neighbours in whatever ratio zeroes out vega and delta, costed with every spread crossed twice. On the committed snapshot the best candidate nets $86 against a $144 gross, so 40% of the gap must close merely to break even.
+- *Inspect* prices any contract three ways with full Greeks, and shows the rate, dividend yield and forward implied by that expiry's own quotes.
+- *Arbitrage* runs put-call parity, vertical, butterfly and calendar checks on executable prices. It finds nothing on SPX, which is the expected result and is reported as such.
 
 ```bash
 pip install -e ".[app]"
 streamlit run app/streamlit_app.py
 ```
 
-Only European, cash-settled index options are supported — SPX, XSP, NDX, RUT, DJX. Equity options are American, which turns put-call parity from an equality into a pair of inequalities and breaks the forward extraction everything else depends on.
+Optional settings go in `.streamlit/secrets.toml`, which git ignores: `FRED_API_KEY` for the Treasury curve (free from FRED), `SEC_USER_AGENT` (your name and email, which the SEC asks every request to carry) and `LIVE_DATA = true` for live quotes and filings.
 
 ## 7. Running it
 
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 159 tests
+pytest
 
 python analysis/convergence.py           # section 1
 python analysis/variance_reduction.py    # section 2
@@ -191,7 +195,7 @@ python analysis/volatility_smile.py      # section 4
 streamlit run app/streamlit_app.py       # section 6
 ```
 
-Every figure in this README regenerates from the committed snapshot. Taking a fresh chain needs `pip install -e ".[data]"` and `python analysis/fetch_chain.py`, which must run on a machine with direct internet access.
+Every figure in this README regenerates from the committed snapshot. Taking a fresh chain needs `pip install -e ".[data]"` and `python analysis/fetch_chain.py`; fresh filings need `python analysis/fetch_fundamentals.py --symbol AAPL`. Both must run on a machine with direct internet access.
 
 Results tables are written to `analysis/results/`.
 

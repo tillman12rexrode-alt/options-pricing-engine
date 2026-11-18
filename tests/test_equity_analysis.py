@@ -169,3 +169,16 @@ def test_an_ask_below_the_no_arbitrage_floor_is_named_not_solved():
     call = analysis.table[analysis.table["kind"] == "call"].iloc[0]
     assert np.isnan(call["model_iv"])
     assert "floor" in call["iv_note"]
+
+
+def test_term_structure_tracks_cboe_at_the_money():
+    """The at-the-money vol per expiry agrees with Cboe's, and the move grows with time."""
+    from optpricing.equity_analysis import term_structure
+
+    snap = _snapshot("AAPL")
+    ts = term_structure(snap, CURVE).dropna(subset=["atm_iv", "cboe_atm_iv"])
+    assert len(ts) >= 15
+    assert ((ts["atm_iv"] - ts["cboe_atm_iv"]).abs() * 100).median() < 0.3
+    assert ts["straddle"].is_monotonic_increasing
+    assert (ts["move_pct"] == ts["straddle"] / snap.spot).all()
+    assert ((ts["strike"] - ts["forward"]).abs() / snap.spot < 0.02).all()

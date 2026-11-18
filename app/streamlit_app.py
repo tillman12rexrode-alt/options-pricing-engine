@@ -1,8 +1,8 @@
 """Options Pricing Engine - a browser app over the optpricing library.
 
 This file only sets up the page and the navigation. Each page lives in its own
-module: stock_options.py for single stocks, index_options.py for the index
-surface scanner. Keeping the entrypoint this thin is what lets each page be
+module: stock_options.py for single stocks' chains, research.py for their
+filings and term structure, index_options.py for the index surface scanner. Keeping the entrypoint this thin is what lets each page be
 tested on its own.
 
 Run it with:
@@ -21,6 +21,7 @@ theme.apply()
 st.navigation(
     [
         st.Page("views/stocks.py", title="Stock options", url_path="stocks", default=True),
+        st.Page("views/research.py", title="Stock research", url_path="research"),
         st.Page("views/index.py", title="Index options", url_path="index"),
     ]
 ).run()

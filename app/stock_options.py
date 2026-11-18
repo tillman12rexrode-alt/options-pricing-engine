@@ -1,9 +1,9 @@
 """Stock options: one ticker's chain, with its source and its age always on screen.
 
-Everything shown here is market-observed: Cboe's quotes and Cboe's own implied
-volatilities. Model prices, American implied volatilities and Greeks are built
-on top of this page in the next phase, and will sit in their own clearly
-labelled columns so a reader never mistakes a model estimate for a quote.
+The Chain tab is market-observed only: Cboe's quotes and Cboe's own implied
+volatilities. The Model vs market, Greeks and Smile tabs are model estimates
+built on those quotes (see model_views.py), shown in their own clearly
+labelled columns so a reader never mistakes an estimate for a quote.
 """
 
 from __future__ import annotations
@@ -51,29 +51,8 @@ def load_live(symbol: str) -> cboe.ChainSnapshot:
 # ----------------------------------------------------------------------- sidebar
 
 
-def _seed(key: str, value: str) -> None:
-    """Give a widget its starting value through session state, once.
-
-    Passing a starting value to the widget itself (index=, value=) looks
-    equivalent and is not: Streamlit treats a changed default as a brand-new
-    widget and silently discards what the visitor just picked.
-    """
-    if key not in st.session_state:
-        st.session_state[key] = value
-
-
 def _pick_bundled(bundled: dict[str, list[Path]]) -> Path:
-    symbols = sorted(bundled)
-    _seed("ticker_picker", state.current_ticker())
-    if st.session_state["ticker_picker"] not in symbols:
-        st.session_state["ticker_picker"] = symbols[0]
-    chosen = st.sidebar.selectbox(
-        "Ticker",
-        symbols,
-        key="ticker_picker",
-        format_func=lambda s: f"{s}  ({state.display_name(s)})",
-    )
-    state.set_ticker(chosen)
+    chosen = state.ticker_select(sorted(bundled), page="stocks")
 
     # Keyed by ticker. Every ticker's list shows the same dates, so without a
     # key Streamlit treats them as one widget and keeps the previous ticker's
@@ -89,15 +68,7 @@ def _pick_bundled(bundled: dict[str, list[Path]]) -> Path:
 
 
 def _pick_live() -> str | None:
-    _seed("ticker_typed", state.current_ticker())
-    typed = st.sidebar.text_input("Ticker", key="ticker_typed", max_chars=5, placeholder="AAPL")
-    try:
-        symbol = cboe.normalize(typed)
-    except cboe.InvalidTickerError as error:
-        st.sidebar.error(str(error))
-        return None
-    state.set_ticker(symbol)
-    return symbol
+    return state.ticker_input(page="stocks")
 
 
 def sidebar() -> tuple[str, str] | None:
@@ -149,7 +120,10 @@ def header(snap: cboe.ChainSnapshot, mode: str) -> None:
             delta=f"{change:+.2f} ({pct:+.2f}%)" if change is not None and pct is not None else None,
         )
         b.metric("Session", snap.trading_date.isoformat())
-        c.metric("Cboe 30-day implied vol", f"{iv30:.1%}" if iv30 else "n/a")
+        c.metric(
+            "Cboe 30-day IV", f"{iv30:.1%}" if iv30 else "n/a",
+            help="Cboe's own 30-day implied volatility for the stock.",
+        )
         d.metric("Contracts listed", f"{len(snap.quotes):,}")
 
     basis = f"the {snap.spot_basis}" if snap.spot_basis != "last trade" else "the last trade"

@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 from collections.abc import Collection
 from dataclasses import dataclass, replace
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -48,7 +49,7 @@ from optpricing.providers.fred import YieldCurve, flat_curve
 from optpricing.smile import SliceFit, fit_slice
 from optpricing.terms import EquityTerms, equity_terms
 
-__all__ = ["ExpiryAnalysis", "analyze_expiry"]
+__all__ = ["ExpiryAnalysis", "analyze_expiry", "implied_carry", "term_structure"]
 
 #: Out-of-the-money quotes wider than this, as a share of mid, are left out of
 #: the smile fit. Stock chains are wider than SPX's, so this is looser than the
@@ -395,3 +396,53 @@ def _add_greeks(table: pd.DataFrame, terms: EquityTerms) -> None:
         out["rho_pt"].append(g["rho"] / 100.0)
     for name, values in out.items():
         table[name] = values
+
+
+def term_structure(
+    snap: ChainSnapshot, curve: YieldCurve, *, policies=None, max_days: int | None = None
+) -> pd.DataFrame:
+    """At-the-money volatility and the move the options price in, expiry by expiry.
+
+    For each expiry, the strike nearest the forward with a two-sided call and
+    put. The straddle (call mid + put mid) is what the market charges for a
+    move in either direction by expiry, the usual "expected move". For a
+    lognormal stock it is about 0.8 of one standard deviation; it is reported
+    as quoted, not rescaled.
+
+    The at-the-money vol is the average of the call's and the put's American
+    implied vols at that strike. Averaging the two cancels most of the carry
+    effect that splits them (see `implied_carry`), so the Treasury curve is
+    good enough here and no carry is solved per expiry.
+    """
+    rows = []
+    for expiry in snap.expiries:
+        days = (date.fromisoformat(expiry) - snap.trading_date).days
+        if days <= 0 or (max_days is not None and days > max_days):
+            continue
+        try:
+            terms = equity_terms(
+                snap.symbol, snap.spot, snap.trading_date, expiry, curve, policies=policies
+            )
+        except ValueError:
+            continue
+        pairs = _pairs(snap, expiry, terms.forward)
+        row = {"expiry": expiry, "days": days, "forward": terms.forward}
+        if pairs.empty:
+            rows.append(row)
+            continue
+        strike = float(pairs.index[0])
+        call, put = float(pairs.iloc[0]["call"]), float(pairs.iloc[0]["put"])
+        quotes = snap.quotes[(snap.quotes["expiry"] == expiry) & (snap.quotes["strike"] == strike)]
+        cboe = pd.to_numeric(quotes["cboe_iv"], errors="coerce")
+        vols = [implied_vol(price, terms.option(strike, kind)) for price, kind in ((call, "call"), (put, "put"))]
+        solved = [v.sigma for v in vols if v.converged]
+        row |= {
+            "strike": strike,
+            "straddle": call + put,
+            "move_pct": (call + put) / snap.spot,
+            "atm_iv": float(np.mean(solved)) if len(solved) == 2 else np.nan,
+            "cboe_atm_iv": float(cboe.mean()) if cboe.notna().all() and len(cboe) == 2 else np.nan,
+        }
+        rows.append(row)
+    columns = ["expiry", "days", "forward", "strike", "straddle", "move_pct", "atm_iv", "cboe_atm_iv"]
+    return pd.DataFrame(rows, columns=columns)
